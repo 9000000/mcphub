@@ -34,6 +34,21 @@ interface MCPRouterConfig {
   baseUrl: string;
 }
 
+interface OAuthServerConfig {
+  enabled: boolean;
+  accessTokenLifetime: number;
+  refreshTokenLifetime: number;
+  authorizationCodeLifetime: number;
+  requireClientSecret: boolean;
+  allowedScopes: string[];
+  requireState: boolean;
+  dynamicRegistration: {
+    enabled: boolean;
+    allowedGrantTypes: string[];
+    requiresAuthentication: boolean;
+  };
+}
+
 interface SystemSettings {
   systemConfig?: {
     routing?: RoutingConfig;
@@ -41,12 +56,29 @@ interface SystemSettings {
     smartRouting?: SmartRoutingConfig;
     mcpRouter?: MCPRouterConfig;
     nameSeparator?: string;
+    oauthServer?: OAuthServerConfig;
+    enableSessionRebuild?: boolean;
   };
 }
 
 interface TempRoutingConfig {
   bearerAuthKey: string;
 }
+
+const getDefaultOAuthServerConfig = (): OAuthServerConfig => ({
+  enabled: true,
+  accessTokenLifetime: 3600,
+  refreshTokenLifetime: 1209600,
+  authorizationCodeLifetime: 300,
+  requireClientSecret: false,
+  allowedScopes: ['read', 'write'],
+  requireState: false,
+  dynamicRegistration: {
+    enabled: true,
+    allowedGrantTypes: ['authorization_code', 'refresh_token'],
+    requiresAuthentication: false,
+  },
+});
 
 export const useSettingsData = () => {
   const { t } = useTranslation();
@@ -85,7 +117,12 @@ export const useSettingsData = () => {
     baseUrl: 'https://api.mcprouter.to/v1',
   });
 
+  const [oauthServerConfig, setOAuthServerConfig] = useState<OAuthServerConfig>(
+    getDefaultOAuthServerConfig(),
+  );
+
   const [nameSeparator, setNameSeparator] = useState<string>('-');
+  const [enableSessionRebuild, setEnableSessionRebuild] = useState<boolean>(false);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -138,8 +175,49 @@ export const useSettingsData = () => {
           baseUrl: data.data.systemConfig.mcpRouter.baseUrl || 'https://api.mcprouter.to/v1',
         });
       }
+      if (data.success) {
+        if (data.data?.systemConfig?.oauthServer) {
+          const oauth = data.data.systemConfig.oauthServer;
+          const defaultOauthConfig = getDefaultOAuthServerConfig();
+          const defaultDynamic = defaultOauthConfig.dynamicRegistration;
+          const allowedScopes = Array.isArray(oauth.allowedScopes)
+            ? [...oauth.allowedScopes]
+            : [...defaultOauthConfig.allowedScopes];
+          const dynamicAllowedGrantTypes = Array.isArray(
+            oauth.dynamicRegistration?.allowedGrantTypes,
+          )
+            ? [...oauth.dynamicRegistration!.allowedGrantTypes!]
+            : [...defaultDynamic.allowedGrantTypes];
+
+          setOAuthServerConfig({
+            enabled: oauth.enabled ?? defaultOauthConfig.enabled,
+            accessTokenLifetime:
+              oauth.accessTokenLifetime ?? defaultOauthConfig.accessTokenLifetime,
+            refreshTokenLifetime:
+              oauth.refreshTokenLifetime ?? defaultOauthConfig.refreshTokenLifetime,
+            authorizationCodeLifetime:
+              oauth.authorizationCodeLifetime ?? defaultOauthConfig.authorizationCodeLifetime,
+            requireClientSecret:
+              oauth.requireClientSecret ?? defaultOauthConfig.requireClientSecret,
+            requireState: oauth.requireState ?? defaultOauthConfig.requireState,
+            allowedScopes,
+            dynamicRegistration: {
+              enabled: oauth.dynamicRegistration?.enabled ?? defaultDynamic.enabled,
+              allowedGrantTypes: dynamicAllowedGrantTypes,
+              requiresAuthentication:
+                oauth.dynamicRegistration?.requiresAuthentication ??
+                defaultDynamic.requiresAuthentication,
+            },
+          });
+        } else {
+          setOAuthServerConfig(getDefaultOAuthServerConfig());
+        }
+      }
       if (data.success && data.data?.systemConfig?.nameSeparator !== undefined) {
         setNameSeparator(data.data.systemConfig.nameSeparator);
+      }
+      if (data.success && data.data?.systemConfig?.enableSessionRebuild !== undefined) {
+        setEnableSessionRebuild(data.data.systemConfig.enableSessionRebuild);
       }
     } catch (error) {
       console.error('Failed to fetch settings:', error);
@@ -390,6 +468,77 @@ export const useSettingsData = () => {
     }
   };
 
+  // Update OAuth server configuration
+  const updateOAuthServerConfig = async <T extends keyof OAuthServerConfig>(
+    key: T,
+    value: OAuthServerConfig[T],
+  ) => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const data = await apiPut('/system-config', {
+        oauthServer: {
+          [key]: value,
+        },
+      });
+
+      if (data.success) {
+        setOAuthServerConfig((prev) => ({
+          ...prev,
+          [key]: value,
+        }));
+        showToast(t('settings.systemConfigUpdated'));
+        return true;
+      } else {
+        showToast(data.message || t('errors.failedToUpdateSystemConfig'));
+        return false;
+      }
+    } catch (error) {
+      console.error('Failed to update OAuth server config:', error);
+      const errorMessage =
+        error instanceof Error ? error.message : 'Failed to update OAuth server config';
+      setError(errorMessage);
+      showToast(errorMessage);
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Update multiple OAuth server config fields
+  const updateOAuthServerConfigBatch = async (updates: Partial<OAuthServerConfig>) => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const data = await apiPut('/system-config', {
+        oauthServer: updates,
+      });
+
+      if (data.success) {
+        setOAuthServerConfig((prev) => ({
+          ...prev,
+          ...updates,
+        }));
+        showToast(t('settings.systemConfigUpdated'));
+        return true;
+      } else {
+        showToast(data.message || t('errors.failedToUpdateSystemConfig'));
+        return false;
+      }
+    } catch (error) {
+      console.error('Failed to update OAuth server config:', error);
+      const errorMessage =
+        error instanceof Error ? error.message : 'Failed to update OAuth server config';
+      setError(errorMessage);
+      showToast(errorMessage);
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Update name separator
   const updateNameSeparator = async (value: string) => {
     setLoading(true);
@@ -412,6 +561,36 @@ export const useSettingsData = () => {
       console.error('Failed to update name separator:', error);
       const errorMessage =
         error instanceof Error ? error.message : 'Failed to update name separator';
+      setError(errorMessage);
+      showToast(errorMessage);
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Update session rebuild setting
+  const updateSessionRebuild = async (value: boolean) => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const data = await apiPut('/system-config', {
+        enableSessionRebuild: value,
+      });
+
+      if (data.success) {
+        setEnableSessionRebuild(value);
+        showToast(t('settings.restartRequired'), 'info');
+        return true;
+      } else {
+        showToast(data.message || t('errors.failedToUpdateSystemConfig'));
+        return false;
+      }
+    } catch (error) {
+      console.error('Failed to update session rebuild setting:', error);
+      const errorMessage =
+        error instanceof Error ? error.message : 'Failed to update session rebuild setting';
       setError(errorMessage);
       showToast(errorMessage);
       return false;
@@ -455,7 +634,9 @@ export const useSettingsData = () => {
     installConfig,
     smartRoutingConfig,
     mcpRouterConfig,
+    oauthServerConfig,
     nameSeparator,
+    enableSessionRebuild,
     loading,
     error,
     setError,
@@ -468,7 +649,10 @@ export const useSettingsData = () => {
     updateRoutingConfigBatch,
     updateMCPRouterConfig,
     updateMCPRouterConfigBatch,
+    updateOAuthServerConfig,
+    updateOAuthServerConfigBatch,
     updateNameSeparator,
+    updateSessionRebuild,
     exportMCPSettings,
   };
 };
