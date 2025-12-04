@@ -4,10 +4,12 @@ import config from '../config/index.js';
 import {
   getAllServers,
   getAllSettings,
+  getServerConfig,
   createServer,
   updateServer,
   deleteServer,
   toggleServer,
+  reloadServer,
   toggleTool,
   updateToolDescription,
   togglePrompt,
@@ -129,11 +131,13 @@ export const initRoutes = (app: express.Application): void => {
 
   // API routes protected by auth middleware in middlewares/index.ts
   router.get('/servers', getAllServers);
+  router.get('/servers/:name', getServerConfig);
   router.get('/settings', getAllSettings);
   router.post('/servers', createServer);
   router.put('/servers/:name', updateServer);
   router.delete('/servers/:name', deleteServer);
   router.post('/servers/:name/toggle', toggleServer);
+  router.post('/servers/:name/reload', reloadServer);
   router.post('/servers/:serverName/tools/:toolName/toggle', toggleTool);
   router.put('/servers/:serverName/tools/:toolName/description', updateToolDescription);
   router.post('/servers/:serverName/prompts/:promptName/toggle', togglePrompt);

@@ -67,13 +67,13 @@ export const auth = async (req: Request, res: Response, next: NextFunction): Pro
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ') && isOAuthServerEnabled()) {
     const accessToken = authHeader.substring(7);
-    const oauthToken = getToken(accessToken);
+    const oauthToken = await getToken(accessToken);
 
     if (oauthToken && oauthToken.accessToken === accessToken) {
       // Valid OAuth token - look up user to get admin status
       const { findUserByUsername } = await import('../models/User.js');
-      const user = findUserByUsername(oauthToken.username);
-      
+      const user = await findUserByUsername(oauthToken.username);
+
       // Set user context with proper admin status
       (req as any).user = {
         username: oauthToken.username,

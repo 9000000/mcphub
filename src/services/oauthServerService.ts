@@ -1,6 +1,6 @@
 import OAuth2Server from '@node-oauth/oauth2-server';
 import { Request as ExpressRequest, Response as ExpressResponse } from 'express';
-import { loadSettings } from '../config/index.js';
+import { getSystemConfigDao } from '../dao/index.js';
 import { findUserByUsername, verifyPassword } from '../models/User.js';
 import {
   findOAuthClientById,
@@ -21,7 +21,7 @@ const oauthModel: OAuth2Server.AuthorizationCodeModel & OAuth2Server.RefreshToke
    * Get client by client ID
    */
   getClient: async (clientId: string, clientSecret?: string) => {
-    const client = findOAuthClientById(clientId);
+    const client = await findOAuthClientById(clientId);
     if (!client) {
       return false;
     }
@@ -50,8 +50,9 @@ const oauthModel: OAuth2Server.AuthorizationCodeModel & OAuth2Server.RefreshToke
     client: OAuth2Server.Client,
     user: OAuth2Server.User,
   ) => {
-    const settings = loadSettings();
-    const oauthConfig = settings.systemConfig?.oauthServer;
+    const systemConfigDao = getSystemConfigDao();
+    const systemConfig = await systemConfigDao.get();
+    const oauthConfig = systemConfig?.oauthServer;
     const lifetime = oauthConfig?.authorizationCodeLifetime || 300;
 
     const scopeString = Array.isArray(code.scope) ? code.scope.join(' ') : code.scope;
@@ -91,7 +92,7 @@ const oauthModel: OAuth2Server.AuthorizationCodeModel & OAuth2Server.RefreshToke
       return false;
     }
 
-    const client = findOAuthClientById(code.clientId);
+    const client = await findOAuthClientById(code.clientId);
     if (!client) {
       return false;
     }
@@ -134,14 +135,15 @@ const oauthModel: OAuth2Server.AuthorizationCodeModel & OAuth2Server.RefreshToke
     client: OAuth2Server.Client,
     user: OAuth2Server.User,
   ) => {
-    const settings = loadSettings();
-    const oauthConfig = settings.systemConfig?.oauthServer;
+    const systemConfigDao = getSystemConfigDao();
+    const systemConfig = await systemConfigDao.get();
+    const oauthConfig = systemConfig?.oauthServer;
     const accessTokenLifetime = oauthConfig?.accessTokenLifetime || 3600;
     const refreshTokenLifetime = oauthConfig?.refreshTokenLifetime || 1209600;
 
     const scopeString = Array.isArray(token.scope) ? token.scope.join(' ') : token.scope;
 
-    const savedToken = saveToken(
+    const savedToken = await saveToken(
       {
         scope: scopeString,
         clientId: client.id,
@@ -170,12 +172,12 @@ const oauthModel: OAuth2Server.AuthorizationCodeModel & OAuth2Server.RefreshToke
    * Get access token
    */
   getAccessToken: async (accessToken: string) => {
-    const token = getToken(accessToken);
+    const token = await getToken(accessToken);
     if (!token) {
       return false;
     }
 
-    const client = findOAuthClientById(token.clientId);
+    const client = await findOAuthClientById(token.clientId);
     if (!client) {
       return false;
     }
@@ -203,12 +205,12 @@ const oauthModel: OAuth2Server.AuthorizationCodeModel & OAuth2Server.RefreshToke
    * Get refresh token
    */
   getRefreshToken: async (refreshToken: string) => {
-    const token = getToken(refreshToken);
+    const token = await getToken(refreshToken);
     if (!token || token.refreshToken !== refreshToken) {
       return false;
     }
 
-    const client = findOAuthClientById(token.clientId);
+    const client = await findOAuthClientById(token.clientId);
     if (!client) {
       return false;
     }
@@ -238,7 +240,7 @@ const oauthModel: OAuth2Server.AuthorizationCodeModel & OAuth2Server.RefreshToke
   revokeToken: async (token: OAuth2Server.Token | OAuth2Server.RefreshToken) => {
     const refreshToken = 'refreshToken' in token ? token.refreshToken : undefined;
     if (refreshToken) {
-      revokeToken(refreshToken);
+      await revokeToken(refreshToken);
     }
     return true;
   },
@@ -252,7 +254,9 @@ const oauthModel: OAuth2Server.AuthorizationCodeModel & OAuth2Server.RefreshToke
     }
 
     const requestedScopes = Array.isArray(scope) ? scope : scope.split(' ');
-    const tokenScopes = Array.isArray(token.scope) ? token.scope : (token.scope as string).split(' ');
+    const tokenScopes = Array.isArray(token.scope)
+      ? token.scope
+      : (token.scope as string).split(' ');
 
     return requestedScopes.every((s) => tokenScopes.includes(s));
   },
@@ -261,8 +265,9 @@ const oauthModel: OAuth2Server.AuthorizationCodeModel & OAuth2Server.RefreshToke
    * Validate scope
    */
   validateScope: async (user: OAuth2Server.User, client: OAuth2Server.Client, scope?: string[]) => {
-    const settings = loadSettings();
-    const oauthConfig = settings.systemConfig?.oauthServer;
+    const systemConfigDao = getSystemConfigDao();
+    const systemConfig = await systemConfigDao.get();
+    const oauthConfig = systemConfig?.oauthServer;
     const allowedScopes = oauthConfig?.allowedScopes || ['read', 'write'];
 
     if (!scope || scope.length === 0) {
@@ -281,9 +286,10 @@ let oauth: OAuth2Server | null = null;
 /**
  * Initialize OAuth server
  */
-export const initOAuthServer = (): void => {
-  const settings = loadSettings();
-  const oauthConfig = settings.systemConfig?.oauthServer;
+export const initOAuthServer = async (): Promise<void> => {
+  const systemConfigDao = getSystemConfigDao();
+  const systemConfig = await systemConfigDao.get();
+  const oauthConfig = systemConfig?.oauthServer;
   const requireState = oauthConfig?.requireState === true;
 
   if (!oauthConfig || !oauthConfig.enabled) {
@@ -333,7 +339,7 @@ export const authenticateUser = async (
   username: string,
   password: string,
 ): Promise<OAuth2Server.User | null> => {
-  const user = findUserByUsername(username);
+  const user = await findUserByUsername(username);
   if (!user) {
     return null;
   }
